@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "hyp-knowledge": {
+      "serverUrl": "https://hyp-knowledge-mcp.bijiadaxiong.workers.dev/mcp",
+      "headers": {
+        "Authorization": "Bearer ${HYP_MCP_TOKEN}"
+      }
+    }
+  }
+}

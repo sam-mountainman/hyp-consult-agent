@@ -1,0 +1,23 @@
+{
+  "name": "hyp-consult-agent",
+  "version": "0.2.18",
+  "description": "HYP/UTAGE YouTube operation consultation agent for Codex.",
+  "author": {
+    "name": "hyp-consult-agent"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "hyp-consult-agent",
+    "shortDescription": "HYP lecture-grounded YouTube operation consultation.",
+    "longDescription": "Connects Codex to the HYP/UTAGE lecture knowledge MCP and adds a /hyp-consult style workflow for source-grounded YouTube operation advice with dated citations.",
+    "developerName": "hyp-consult-agent",
+    "category": "Productivity",
+    "capabilities": ["mcp", "skills"],
+    "defaultPrompt": "Use the HYP knowledge MCP to answer a YouTube operation question with dated sources.",
+    "brandColor": "#172C66",
+    "composerIcon": "./assets/hyp-logo.png",
+    "logo": "./assets/hyp-logo.png",
+    "logoDark": "./assets/hyp-logo.png"
+  },
+  "mcpServers": "./.mcp.json"
+}

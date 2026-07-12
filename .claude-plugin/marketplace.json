@@ -1,0 +1,21 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "hyp-consult-agent",
+  "description": "hyp-consult-agent plugin marketplace for Claude Code.",
+  "owner": {
+    "name": "hyp-consult-agent"
+  },
+  "plugins": [
+    {
+      "name": "hyp-consult-agent",
+      "description": "HYP lecture-grounded YouTube operation consultation with MCP search and /hyp-consult skill.",
+      "version": "0.2.18",
+      "author": {
+        "name": "hyp-consult-agent"
+      },
+      "source": "./plugins/hyp-consult-agent-claude-code",
+      "category": "knowledge",
+      "strict": false
+    }
+  ]
+}

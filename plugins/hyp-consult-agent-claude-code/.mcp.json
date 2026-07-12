@@ -1,0 +1,11 @@
+{
+  "hyp-knowledge": {
+    "type": "http",
+    "url": "https://hyp-knowledge-mcp.bijiadaxiong.workers.dev/mcp",
+    "headers": {
+      "Authorization": "Bearer ${HYP_MCP_TOKEN}"
+    },
+    "alwaysLoad": false,
+    "timeout": 120000
+  }
+}

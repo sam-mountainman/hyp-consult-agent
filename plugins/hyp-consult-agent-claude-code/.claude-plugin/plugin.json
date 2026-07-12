@@ -1,0 +1,15 @@
+{
+  "name": "hyp-consult-agent",
+  "version": "0.2.18",
+  "description": "HYP/UTAGE YouTube operation consultation agent for Claude Code.",
+  "author": {
+    "name": "hyp-consult-agent"
+  },
+  "repository": "https://hyp-knowledge-mcp.bijiadaxiong.workers.dev",
+  "keywords": [
+    "hyp",
+    "youtube",
+    "mcp",
+    "consultation"
+  ]
+}

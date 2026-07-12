@@ -1,0 +1,17 @@
+{
+  "name": "hyp-consult-agent",
+  "version": "0.2.18",
+  "description": "HYP/UTAGE YouTube operation consultation agent.",
+  "author": {
+    "name": "hyp-consult-agent"
+  },
+  "repository": "https://github.com/sam-mountainman/hyp-consult-agent",
+  "keywords": [
+    "hyp",
+    "youtube",
+    "mcp",
+    "consultation"
+  ],
+  "logo": "plugins/hyp-consult-agent/assets/hyp-logo.png",
+  "skills": "skills"
+}
