@@ -26,7 +26,7 @@ SKILL_CACHE_COMPAT_NAME = "hyp-consult"
 SERVER_NAME = "hyp-knowledge"
 TOKEN_ENV = "HYP_MCP_TOKEN"
 REMOTE_URL = "https://hyp-knowledge-mcp.bijiadaxiong.workers.dev/mcp"
-SMOKE_USER_AGENT = "hyp-consult-agent-setup/0.2.22"
+SMOKE_USER_AGENT = "hyp-consult-agent-setup/0.2.23"
 CLIENT_ALIASES = {
     "codex": "codex",
     "claude": "claude-code",
@@ -221,30 +221,45 @@ def resolve_token(no_prompt: bool) -> str:
 
 
 def verify_remote(token: str) -> dict:
-    payload = json.dumps(
-        {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}
-    ).encode("utf-8")
-    request = urllib.request.Request(
-        REMOTE_URL,
-        data=payload,
-        method="POST",
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "User-Agent": SMOKE_USER_AGENT,
-        },
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            data = json.loads(response.read().decode("utf-8", "replace"))
-            tools = data.get("result", {}).get("tools", [])
+    def post(payload: dict) -> dict:
+        request = urllib.request.Request(
+            REMOTE_URL,
+            data=json.dumps(payload).encode("utf-8"),
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": SMOKE_USER_AGENT,
+            },
+        )
+        with urllib.request.urlopen(request, timeout=90) as response:
             return {
-                "label": "remote_mcp_smoke",
-                "status": "ok",
-                "http_status": response.status,
-                "tool_count": len(tools),
+                "status": response.status,
+                "payload": json.loads(response.read().decode("utf-8", "replace")),
             }
+
+    try:
+        listed = post({"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}})
+        tools = listed["payload"].get("result", {}).get("tools", [])
+        called = post(
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": "get_hyp_corpus_stats", "arguments": {}},
+            }
+        )
+        result = called["payload"].get("result", {})
+        if result.get("isError") or not result.get("content"):
+            raise RuntimeError("HYP MCP tool execution did not return a usable result.")
+        return {
+            "label": "remote_mcp_smoke",
+            "status": "ok",
+            "http_status": called["status"],
+            "tool_count": len(tools),
+            "tool_execution": "get_hyp_corpus_stats",
+        }
     except urllib.error.HTTPError as exc:
         if exc.code == 401:
             reason = "The HYP MCP access token was rejected."
@@ -400,6 +415,52 @@ def stage_authenticated_marketplace(token: str, dry_run: bool = False) -> tuple[
         },
         str(destination),
     )
+
+
+def remove_workspace_mcp_shadow(dry_run: bool = False) -> dict:
+    """Remove the legacy repo-root MCP config that can override the plugin.
+
+    Older public bundles shipped a root `.mcp.json` using the literal
+    `Bearer ${HYP_MCP_TOKEN}` template. Codex Desktop does not expand that
+    template when it loads a workspace MCP file, so it can shadow the
+    authenticated plugin config and send an invalid bearer token.
+    """
+    path = bundle_root() / ".mcp.json"
+    if dry_run:
+        return {
+            "label": "workspace_mcp_shadow_cleanup",
+            "status": "dry_run",
+            "path": str(path),
+        }
+    if not path.exists():
+        return {
+            "label": "workspace_mcp_shadow_cleanup",
+            "status": "ok",
+            "removed": False,
+            "path": str(path),
+        }
+    try:
+        data = read_json(path)
+    except (OSError, json.JSONDecodeError) as exc:
+        return {
+            "label": "workspace_mcp_shadow_cleanup",
+            "status": "failed",
+            "reason": f"could not inspect {path}: {type(exc).__name__}: {exc}",
+        }
+    server = data.get("mcpServers", {}).get(SERVER_NAME, {})
+    if server.get("url") != REMOTE_URL:
+        return {
+            "label": "workspace_mcp_shadow_cleanup",
+            "status": "failed",
+            "reason": f"refusing to remove an unrelated workspace MCP config: {path}",
+        }
+    path.unlink()
+    return {
+        "label": "workspace_mcp_shadow_cleanup",
+        "status": "ok",
+        "removed": True,
+        "path": str(path),
+    }
 
 
 def run(label: str, command: list[str], dry_run: bool = False) -> dict:
@@ -664,6 +725,7 @@ def main() -> int:
     runtime_result, runtime_source = stage_authenticated_marketplace(token, dry_run)
     results = [
         persist_token(token, dry_run),
+        remove_workspace_mcp_shadow(dry_run),
         runtime_result,
         *setup_target(target, runtime_source, token, dry_run),
         smoke,
