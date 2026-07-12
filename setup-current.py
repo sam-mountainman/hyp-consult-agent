@@ -26,7 +26,7 @@ SKILL_CACHE_COMPAT_NAME = "hyp-consult"
 SERVER_NAME = "hyp-knowledge"
 TOKEN_ENV = "HYP_MCP_TOKEN"
 REMOTE_URL = "https://hyp-knowledge-mcp.bijiadaxiong.workers.dev/mcp"
-SMOKE_USER_AGENT = "hyp-consult-agent-setup/0.2.18"
+SMOKE_USER_AGENT = "hyp-consult-agent-setup/0.2.19"
 CLIENT_ALIASES = {
     "codex": "codex",
     "claude": "claude-code",
@@ -341,6 +341,73 @@ def run(label: str, command: list[str], dry_run: bool = False) -> dict:
     }
 
 
+def run_cleanup(label: str, command: list[str], dry_run: bool = False) -> dict:
+    result = run(label, command, dry_run)
+    if dry_run or result.get("status") == "ok":
+        return result
+    output = str(result.get("output") or "").lower()
+    if any(
+        phrase in output
+        for phrase in (
+            "not installed",
+            "not found",
+            "does not exist",
+            "no marketplace",
+            "unknown plugin",
+        )
+    ):
+        result["status"] = "ok"
+        result["cleanup_note"] = "already absent"
+    return result
+
+
+def clear_codex_plugin_cache(dry_run: bool = False) -> dict:
+    codex_home = Path(os.getenv("CODEX_HOME") or (Path.home() / ".codex"))
+    cache_root = codex_home / "plugins" / "cache" / PLUGIN_NAME
+    if dry_run:
+        return {"label": "codex_stale_cache", "status": "dry_run", "path": str(cache_root)}
+    if cache_root.exists():
+        shutil.rmtree(cache_root)
+    return {"label": "codex_stale_cache", "status": "ok", "path": str(cache_root)}
+
+
+def verify_codex_plugin_version(dry_run: bool = False) -> dict:
+    expected = str(
+        read_json(bundle_root() / "plugins" / PLUGIN_NAME / ".codex-plugin" / "plugin.json").get(
+            "version"
+        )
+        or ""
+    )
+    if dry_run:
+        return {
+            "label": "codex_plugin_version",
+            "status": "dry_run",
+            "expected": expected,
+        }
+    executable = shutil.which("codex")
+    if not executable:
+        return {"label": "codex_plugin_version", "status": "failed", "reason": "codex CLI not found"}
+    result = subprocess.run(
+        [executable, "plugin", "list", "--json"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    try:
+        installed = json.loads(result.stdout).get("installed", [])
+    except json.JSONDecodeError:
+        installed = []
+    match = next((item for item in installed if item.get("pluginId") == PLUGIN), None)
+    actual = str((match or {}).get("version") or "")
+    return {
+        "label": "codex_plugin_version",
+        "status": "ok" if actual == expected and expected else "failed",
+        "expected": expected,
+        "actual": actual or None,
+        **({} if actual == expected and expected else {"reason": "installed plugin version mismatch"}),
+    }
+
+
 def read_json(path: Path) -> dict:
     if not path.exists():
         return {}
@@ -436,12 +503,30 @@ def configure_antigravity(token: str, dry_run: bool = False) -> list[dict]:
 def setup_target(target: str, source: str, token: str, dry_run: bool) -> list[dict]:
     if target == "codex":
         return [
+            run_cleanup("codex_old_plugin", ["codex", "plugin", "remove", PLUGIN], dry_run),
+            run_cleanup(
+                "codex_old_marketplace",
+                ["codex", "plugin", "marketplace", "remove", PLUGIN_NAME],
+                dry_run,
+            ),
+            clear_codex_plugin_cache(dry_run),
             run("codex_marketplace", ["codex", "plugin", "marketplace", "add", source], dry_run),
             run("codex_plugin", ["codex", "plugin", "add", PLUGIN], dry_run),
             install_codex_cache_compat(dry_run),
+            verify_codex_plugin_version(dry_run),
         ]
     if target == "claude-code":
         return [
+            run_cleanup(
+                "claude_old_plugin",
+                ["claude", "plugin", "uninstall", "--scope", "user", PLUGIN],
+                dry_run,
+            ),
+            run_cleanup(
+                "claude_old_marketplace",
+                ["claude", "plugin", "marketplace", "remove", PLUGIN_NAME],
+                dry_run,
+            ),
             run("claude_marketplace", ["claude", "plugin", "marketplace", "add", source], dry_run),
             run("claude_plugin", ["claude", "plugin", "install", "--scope", "user", PLUGIN], dry_run),
         ]

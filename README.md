@@ -74,4 +74,4 @@ python3 setup-current.py codex --dry-run
 - 公開リポジトリに含まれるのは接続設定と相談スキルだけです。
 - HYP講義データは認証済みMCPサーバーからのみ取得されます。
 
-Version: `0.2.18`
+Version: `0.2.19`
