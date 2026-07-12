@@ -26,7 +26,7 @@ SKILL_CACHE_COMPAT_NAME = "hyp-consult"
 SERVER_NAME = "hyp-knowledge"
 TOKEN_ENV = "HYP_MCP_TOKEN"
 REMOTE_URL = "https://hyp-knowledge-mcp.bijiadaxiong.workers.dev/mcp"
-SMOKE_USER_AGENT = "hyp-consult-agent-setup/0.2.19"
+SMOKE_USER_AGENT = "hyp-consult-agent-setup/0.2.20"
 CLIENT_ALIASES = {
     "codex": "codex",
     "claude": "claude-code",
@@ -310,6 +310,97 @@ def persist_token(token: str, dry_run: bool = False) -> dict:
     return {"label": "token_storage", "status": "ok", "locations": locations}
 
 
+def patch_runtime_auth(path: Path, token: str) -> None:
+    data = read_json(path)
+    if "mcpServers" in data:
+        server = data["mcpServers"].get(SERVER_NAME, {})
+    else:
+        server = data.get(SERVER_NAME, {})
+    uses_codex_headers = "bearer_token_env_var" in server or "http_headers" in server
+    server.pop("bearer_token_env_var", None)
+    server.pop("env_http_headers", None)
+    header_key = "http_headers" if uses_codex_headers else "headers"
+    server.pop("http_headers" if header_key == "headers" else "headers", None)
+    server[header_key] = {"Authorization": f"Bearer {token}"}
+    write_json(path, data)
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
+
+
+def stage_authenticated_marketplace(token: str, dry_run: bool = False) -> tuple[dict, str]:
+    destination = Path.home() / ".hyp-consult-agent" / "marketplace"
+    if dry_run:
+        return (
+            {
+                "label": "authenticated_marketplace",
+                "status": "dry_run",
+                "path": str(destination),
+            },
+            str(destination),
+        )
+
+    if destination.exists():
+        shutil.rmtree(destination)
+    destination.mkdir(parents=True, mode=0o700)
+    included = [
+        ".agents",
+        ".claude-plugin",
+        ".cursor-plugin",
+        "plugins",
+        "antigravity-plugin",
+        "skills",
+        "AGENTS.md",
+        "CLAUDE.md",
+        "README.md",
+        ".mcp.json",
+    ]
+    for name in included:
+        source = bundle_root() / name
+        target = destination / name
+        if not source.exists():
+            continue
+        if source.is_dir():
+            shutil.copytree(
+                source,
+                target,
+                ignore=shutil.ignore_patterns(".git", "__pycache__", "*.pyc", ".DS_Store"),
+            )
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+
+    auth_files = [
+        destination / "plugins" / PLUGIN_NAME / ".mcp.json",
+        destination / "plugins" / f"{PLUGIN_NAME}-claude-code" / ".mcp.json",
+        destination / "antigravity-plugin" / PLUGIN_NAME / "mcp_config.json",
+        destination / ".mcp.json",
+    ]
+    patched = []
+    for path in auth_files:
+        if path.exists():
+            patch_runtime_auth(path, token)
+            patched.append(str(path))
+
+    if len(patched) < 2:
+        raise RuntimeError("authenticated marketplace is missing expected MCP configuration files")
+    for directory in [destination, *[path for path in destination.rglob("*") if path.is_dir()]]:
+        try:
+            directory.chmod(0o700)
+        except OSError:
+            pass
+    return (
+        {
+            "label": "authenticated_marketplace",
+            "status": "ok",
+            "path": str(destination),
+            "patched_config_count": len(patched),
+        },
+        str(destination),
+    )
+
+
 def run(label: str, command: list[str], dry_run: bool = False) -> dict:
     if dry_run:
         return {"label": label, "status": "dry_run", "command": command}
@@ -567,12 +658,19 @@ def main() -> int:
         print(json.dumps({"status": "failed", "results": [smoke]}, ensure_ascii=False, indent=2))
         return 1
 
-    results = [persist_token(token, dry_run), *setup_target(target, source, token, dry_run), smoke]
+    runtime_result, runtime_source = stage_authenticated_marketplace(token, dry_run)
+    results = [
+        persist_token(token, dry_run),
+        runtime_result,
+        *setup_target(target, runtime_source, token, dry_run),
+        smoke,
+    ]
     failed = any(item.get("status") == "failed" for item in results)
     summary = {
         "status": "failed" if failed else "ok",
         "target": target,
         "source": source,
+        "runtime_source": runtime_source,
         "dry_run": dry_run,
         "results": results,
         "next_steps": next_steps(target),

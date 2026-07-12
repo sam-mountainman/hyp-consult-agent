@@ -9,7 +9,7 @@
     {
       "name": "hyp-consult-agent",
       "description": "HYP lecture-grounded YouTube operation consultation with MCP search and /hyp-consult skill.",
-      "version": "0.2.19",
+      "version": "0.2.20",
       "author": {
         "name": "hyp-consult-agent"
       },

@@ -51,11 +51,12 @@ cd hyp-consult-agent
 ## トークンの保存先
 
 - Codex: `~/.codex/.env`
+- 認証済みローカルマーケットプレイス: `~/.hyp-consult-agent/marketplace`
 - Claude Codeなどのターミナルクライアント: `~/.zshrc` または `~/.bashrc`
 - Windows: ユーザー環境変数
 - Cursor / Antigravity: 各クライアントのローカルMCP設定
 
-トークンはこのGitリポジトリ、コマンド引数、セットアップ結果には保存・表示されません。
+トークンは公開Gitリポジトリ、コマンド引数、セットアップ結果には保存・表示されません。CodexがGUI起動でも確実に認証できるよう、ユーザー専用のローカルマーケットプレイスには認証済みMCP設定が保存されます。
 
 ## セットアップ確認
 
@@ -74,4 +75,4 @@ python3 setup-current.py codex --dry-run
 - 公開リポジトリに含まれるのは接続設定と相談スキルだけです。
 - HYP講義データは認証済みMCPサーバーからのみ取得されます。
 
-Version: `0.2.19`
+Version: `0.2.20`
