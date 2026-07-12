@@ -26,7 +26,7 @@ SKILL_CACHE_COMPAT_NAME = "hyp-consult"
 SERVER_NAME = "hyp-knowledge"
 TOKEN_ENV = "HYP_MCP_TOKEN"
 REMOTE_URL = "https://hyp-knowledge-mcp.bijiadaxiong.workers.dev/mcp"
-SMOKE_USER_AGENT = "hyp-consult-agent-setup/0.2.21"
+SMOKE_USER_AGENT = "hyp-consult-agent-setup/0.2.22"
 CLIENT_ALIASES = {
     "codex": "codex",
     "claude": "claude-code",
@@ -631,7 +631,9 @@ def setup_target(target: str, source: str, token: str, dry_run: bool) -> list[di
 
 def next_steps(target: str) -> list[str]:
     return {
-        "codex": ["Restart Codex or start a new task."],
+        "codex": [
+            "Quit Codex completely and reopen it. Starting a new task without restarting is not sufficient."
+        ],
         "claude-code": ["Open a new terminal and start a new Claude Code session."],
         "cursor": ["Restart Cursor."],
         "antigravity": ["Restart Antigravity."],
@@ -673,6 +675,7 @@ def main() -> int:
         "source": source,
         "runtime_source": runtime_source,
         "dry_run": dry_run,
+        "client_restart_required": target == "codex" and not dry_run,
         "results": results,
         "next_steps": next_steps(target),
     }

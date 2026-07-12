@@ -17,8 +17,10 @@ a local password dialog for the HYP MCP access token. Never ask the user to
 paste that token into chat, never print it, and never add it to this repository.
 
 The installer verifies the token with the HYP MCP server before changing the
-client configuration. After a successful install, restart only the client that
-was changed or start a new session/task.
+client configuration. After a successful Codex install, tell the user to quit
+Codex completely and reopen it. A new task alone does not reload an MCP process
+that was already running before installation. For other clients, restart only
+the client that was changed.
 
 If Python, the target client CLI, or its configuration directory is missing,
 report that exact prerequisite instead of attempting a different client.
