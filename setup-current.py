@@ -26,7 +26,7 @@ SKILL_CACHE_COMPAT_NAME = "hyp-consult"
 SERVER_NAME = "hyp-knowledge"
 TOKEN_ENV = "HYP_MCP_TOKEN"
 REMOTE_URL = "https://hyp-knowledge-mcp.bijiadaxiong.workers.dev/mcp"
-SMOKE_USER_AGENT = "hyp-consult-agent-setup/0.2.20"
+SMOKE_USER_AGENT = "hyp-consult-agent-setup/0.2.21"
 CLIENT_ALIASES = {
     "codex": "codex",
     "claude": "claude-code",
@@ -205,9 +205,10 @@ def prompt_token() -> str:
 
 
 def resolve_token(no_prompt: bool) -> str:
-    token = os.getenv(TOKEN_ENV, "").strip()
-    if not token and not no_prompt:
-        token = prompt_token().strip()
+    # Interactive installs must always ask the user. A long-running AI client
+    # can retain an old token in its process environment even after local
+    # settings were removed, which would otherwise bypass the password dialog.
+    token = os.getenv(TOKEN_ENV, "").strip() if no_prompt else prompt_token().strip()
     if token.startswith("Bearer "):
         token = token[len("Bearer ") :].strip()
     if not token:
