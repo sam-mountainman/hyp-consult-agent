@@ -48,6 +48,34 @@ cd hyp-consult-agent
 
 対象名は `codex`、`claude-code`、`cursor`、`antigravity` のいずれかです。
 
+## 自動更新
+
+CodexまたはClaude Codeへセットアップすると、正式なGitHub Releaseを毎日11:15に確認する自動更新が有効になります。
+
+- macOS: ユーザーの`launchd`
+- Windows: タスクスケジューラ
+- Linux: ユーザーの`systemd timer`
+
+更新対象は、そのPCに実際にインストールされているCodex版・Claude Code版だけです。保存済みトークンは再利用されますが、ログやコマンド引数には表示されません。更新前に実際のHYP MCPツールを呼び出して認証とサーバー動作を確認し、インストールに失敗した場合は直前バージョンへ戻します。
+
+更新後、実行中のCodexやClaude Codeを強制終了することはありません。次回の完全再起動から新バージョンが使われます。
+
+手動確認・手動更新:
+
+```bash
+python3 update-current.py --check-only
+python3 update-current.py
+```
+
+Windows PowerShell:
+
+```powershell
+.\update-current.ps1 --check-only
+.\update-current.ps1
+```
+
+自動更新を登録しない場合は初回セットアップへ`--no-auto-update`を付けます。後から解除する場合は`python3 update-current.py --remove-schedule`を実行します。
+
 ## トークンの保存先
 
 - Codex: `~/.codex/.env`
@@ -60,7 +88,11 @@ cd hyp-consult-agent
 
 ## セットアップ確認
 
-成功時は `remote_mcp_smoke` が `ok` になり、利用可能なMCPツール数が表示されます。Codexはセットアップ前のMCPプロセスを保持するため、完了後に `Command + Q`（Windowsはアプリ終了）で完全終了し、再起動してください。新しいタスクを開くだけでは認証設定が再読込されない場合があります。
+成功時は `remote_mcp_smoke` が `ok` になり、利用可能なMCPツール数が表示されます。さらに`codex_plugin_version`または`claude_plugin_version`でプラグインが有効であること、`consultation_quality_rules`で品質スキルがUTF-8として正しく配置されたことを確認します。
+
+品質スキルはプラグイン内だけでなく、Codexでは`~/.codex/skills/hyp-consult`、Claude Codeでは`~/.claude/skills/hyp-consult`にも互換用として配置されます。そのため、HYPプロジェクト固有の`AGENTS.md`がない別PCでも同じ相談ルールを読み込めます。
+
+Codexはセットアップ前のMCPプロセスとスキル一覧を保持するため、完了後に `Command + Q`（Windowsはアプリ終了）で完全終了し、再起動してください。新しいタスクを開くだけでは不十分です。セットアップしたタスクの中で`SKILL.md`を検索・手動読込しても、MCPツールは後から追加されません。
 
 設定を書き換えずに確認する場合:
 
@@ -75,4 +107,4 @@ python3 setup-current.py codex --dry-run
 - 公開リポジトリに含まれるのは接続設定と相談スキルだけです。
 - HYP講義データは認証済みMCPサーバーからのみ取得されます。
 
-Version: `0.2.23`
+Version: `0.2.24`

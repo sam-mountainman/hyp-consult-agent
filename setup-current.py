@@ -26,7 +26,7 @@ SKILL_CACHE_COMPAT_NAME = "hyp-consult"
 SERVER_NAME = "hyp-knowledge"
 TOKEN_ENV = "HYP_MCP_TOKEN"
 REMOTE_URL = "https://hyp-knowledge-mcp.bijiadaxiong.workers.dev/mcp"
-SMOKE_USER_AGENT = "hyp-consult-agent-setup/0.2.23"
+SMOKE_USER_AGENT = "hyp-consult-agent-setup/0.2.24"
 CLIENT_ALIASES = {
     "codex": "codex",
     "claude": "claude-code",
@@ -108,18 +108,23 @@ def detect_current_client() -> str | None:
     return None
 
 
-def parse_args() -> tuple[str | None, str, bool, bool]:
+def parse_args() -> tuple[str | None, str, bool, bool, bool]:
     args = sys.argv[1:]
     dry_run = "--dry-run" in args
     no_prompt = "--no-prompt" in args
-    args = [arg for arg in args if arg not in {"--dry-run", "--no-prompt"}]
+    no_auto_update = "--no-auto-update" in args
+    args = [
+        arg
+        for arg in args
+        if arg not in {"--dry-run", "--no-prompt", "--no-auto-update"}
+    ]
     target = normalize_client(args[0]) if args else None
     if target:
         args = args[1:]
     else:
         target = detect_current_client()
     source = args[0] if args else str(bundle_root())
-    return target, source, dry_run, no_prompt
+    return target, source, dry_run, no_prompt, no_auto_update
 
 
 def prompt_macos_token() -> str:
@@ -127,7 +132,7 @@ def prompt_macos_token() -> str:
         'set answerResult to display dialog "HYP MCPアクセストークンを入力してください。" '
         'default answer "" with hidden answer buttons {"キャンセル", "設定"} '
         'default button "設定" cancel button "キャンセル"\n'
-        'return text returned of answerResult'
+        "return text returned of answerResult"
     )
     result = subprocess.run(
         ["osascript", "-e", script],
@@ -142,7 +147,7 @@ def prompt_windows_token() -> str:
     powershell = shutil.which("powershell") or shutil.which("pwsh")
     if not powershell:
         return ""
-    script = r'''
+    script = r"""
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 $form = New-Object System.Windows.Forms.Form
@@ -171,7 +176,7 @@ $form.CancelButton = $cancel
 if ($form.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
   [Console]::Out.Write($box.Text)
 }
-'''
+"""
     result = subprocess.run(
         [powershell, "-NoProfile", "-Command", script],
         text=True,
@@ -297,7 +302,9 @@ def persist_token(token: str, dry_run: bool = False) -> dict:
             "locations": [str(codex_env), "user environment"],
         }
     os.environ[TOKEN_ENV] = token
-    replace_setting(codex_env, (f"{TOKEN_ENV}=", f"export {TOKEN_ENV}="), f"{TOKEN_ENV}={token}")
+    replace_setting(
+        codex_env, (f"{TOKEN_ENV}=", f"export {TOKEN_ENV}="), f"{TOKEN_ENV}={token}"
+    )
     try:
         codex_env.chmod(0o600)
     except OSError:
@@ -345,7 +352,9 @@ def patch_runtime_auth(path: Path, token: str) -> None:
         pass
 
 
-def stage_authenticated_marketplace(token: str, dry_run: bool = False) -> tuple[dict, str]:
+def stage_authenticated_marketplace(
+    token: str, dry_run: bool = False
+) -> tuple[dict, str]:
     destination = Path.home() / ".hyp-consult-agent" / "marketplace"
     if dry_run:
         return (
@@ -381,7 +390,9 @@ def stage_authenticated_marketplace(token: str, dry_run: bool = False) -> tuple[
             shutil.copytree(
                 source,
                 target,
-                ignore=shutil.ignore_patterns(".git", "__pycache__", "*.pyc", ".DS_Store"),
+                ignore=shutil.ignore_patterns(
+                    ".git", "__pycache__", "*.pyc", ".DS_Store"
+                ),
             )
         else:
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -400,8 +411,13 @@ def stage_authenticated_marketplace(token: str, dry_run: bool = False) -> tuple[
             patched.append(str(path))
 
     if len(patched) < 2:
-        raise RuntimeError("authenticated marketplace is missing expected MCP configuration files")
-    for directory in [destination, *[path for path in destination.rglob("*") if path.is_dir()]]:
+        raise RuntimeError(
+            "authenticated marketplace is missing expected MCP configuration files"
+        )
+    for directory in [
+        destination,
+        *[path for path in destination.rglob("*") if path.is_dir()],
+    ]:
         try:
             directory.chmod(0o700)
         except OSError:
@@ -414,6 +430,122 @@ def stage_authenticated_marketplace(token: str, dry_run: bool = False) -> tuple[
             "patched_config_count": len(patched),
         },
         str(destination),
+    )
+
+
+def package_version() -> str:
+    manifest = read_json(
+        bundle_root() / "plugins" / PLUGIN_NAME / ".codex-plugin" / "plugin.json"
+    )
+    version = str(manifest.get("version") or "").strip()
+    if not version:
+        raise RuntimeError("plugin version is missing from the Codex manifest")
+    return version
+
+
+def stage_updater_runtime(dry_run: bool = False) -> tuple[dict, Path]:
+    """Keep a versioned public bundle for scheduled updates and rollback."""
+    version = package_version()
+    updater_root = Path.home() / ".hyp-consult-agent" / "updater"
+    destination = updater_root / "releases" / version
+    launcher = updater_root / "update-current.py"
+    if dry_run:
+        return (
+            {
+                "label": "auto_update_runtime",
+                "status": "dry_run",
+                "version": version,
+                "path": str(destination),
+                "launcher": str(launcher),
+            },
+            launcher,
+        )
+
+    source_root = bundle_root().resolve()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if source_root != destination.resolve():
+        staging = destination.with_name(f".{version}.staging-{os.getpid()}")
+        if staging.exists():
+            shutil.rmtree(staging)
+        staging.mkdir(parents=True, mode=0o700)
+        included = [
+            ".agents",
+            ".claude-plugin",
+            ".cursor-plugin",
+            "plugins",
+            "antigravity-plugin",
+            "skills",
+            "AGENTS.md",
+            "CLAUDE.md",
+            "README.md",
+            "setup-current.py",
+            "setup-current.ps1",
+            "setup-current.cmd",
+            "update-current.py",
+            "update-current.ps1",
+            "update-current.cmd",
+        ]
+        for name in included:
+            source = source_root / name
+            target = staging / name
+            if not source.exists():
+                continue
+            if source.is_dir():
+                shutil.copytree(
+                    source,
+                    target,
+                    ignore=shutil.ignore_patterns(
+                        ".git", "__pycache__", "*.pyc", ".DS_Store"
+                    ),
+                )
+            else:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, target)
+        if (
+            not (staging / "setup-current.py").exists()
+            or not (staging / "update-current.py").exists()
+        ):
+            shutil.rmtree(staging, ignore_errors=True)
+            raise RuntimeError("public bundle is missing the automatic update scripts")
+        if destination.exists():
+            shutil.rmtree(destination)
+        staging.rename(destination)
+
+    updater_root.mkdir(parents=True, mode=0o700, exist_ok=True)
+    shutil.copy2(destination / "update-current.py", launcher)
+    try:
+        launcher.chmod(0o700)
+    except OSError:
+        pass
+
+    releases = sorted(
+        [
+            path
+            for path in destination.parent.iterdir()
+            if path.is_dir() and not path.name.startswith(".")
+        ],
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    for stale in releases[3:]:
+        shutil.rmtree(stale, ignore_errors=True)
+    return (
+        {
+            "label": "auto_update_runtime",
+            "status": "ok",
+            "version": version,
+            "path": str(destination),
+            "launcher": str(launcher),
+        },
+        launcher,
+    )
+
+
+def configure_auto_update_schedule(launcher: Path, dry_run: bool = False) -> dict:
+    return run(
+        "auto_update_schedule",
+        [sys.executable, str(launcher), "--install-schedule"],
+        dry_run,
     )
 
 
@@ -480,10 +612,15 @@ def run(label: str, command: list[str], dry_run: bool = False) -> dict:
         capture_output=True,
         check=False,
     )
-    combined = "\n".join(part for part in [result.stdout.strip(), result.stderr.strip()] if part)
+    combined = "\n".join(
+        part for part in [result.stdout.strip(), result.stderr.strip()] if part
+    )
     ok = result.returncode == 0 or (
         "already" in combined.lower()
-        and any(word in combined.lower() for word in ["install", "exist", "configured", "added"])
+        and any(
+            word in combined.lower()
+            for word in ["install", "exist", "configured", "added"]
+        )
     )
     return {
         "label": label,
@@ -518,7 +655,11 @@ def clear_codex_plugin_cache(dry_run: bool = False) -> dict:
     codex_home = Path(os.getenv("CODEX_HOME") or (Path.home() / ".codex"))
     cache_root = codex_home / "plugins" / "cache" / PLUGIN_NAME
     if dry_run:
-        return {"label": "codex_stale_cache", "status": "dry_run", "path": str(cache_root)}
+        return {
+            "label": "codex_stale_cache",
+            "status": "dry_run",
+            "path": str(cache_root),
+        }
     if cache_root.exists():
         shutil.rmtree(cache_root)
     return {"label": "codex_stale_cache", "status": "ok", "path": str(cache_root)}
@@ -526,9 +667,9 @@ def clear_codex_plugin_cache(dry_run: bool = False) -> dict:
 
 def verify_codex_plugin_version(dry_run: bool = False) -> dict:
     expected = str(
-        read_json(bundle_root() / "plugins" / PLUGIN_NAME / ".codex-plugin" / "plugin.json").get(
-            "version"
-        )
+        read_json(
+            bundle_root() / "plugins" / PLUGIN_NAME / ".codex-plugin" / "plugin.json"
+        ).get("version")
         or ""
     )
     if dry_run:
@@ -539,7 +680,11 @@ def verify_codex_plugin_version(dry_run: bool = False) -> dict:
         }
     executable = shutil.which("codex")
     if not executable:
-        return {"label": "codex_plugin_version", "status": "failed", "reason": "codex CLI not found"}
+        return {
+            "label": "codex_plugin_version",
+            "status": "failed",
+            "reason": "codex CLI not found",
+        }
     result = subprocess.run(
         [executable, "plugin", "list", "--json"],
         text=True,
@@ -552,12 +697,75 @@ def verify_codex_plugin_version(dry_run: bool = False) -> dict:
         installed = []
     match = next((item for item in installed if item.get("pluginId") == PLUGIN), None)
     actual = str((match or {}).get("version") or "")
+    enabled = bool((match or {}).get("enabled"))
+    valid = actual == expected and bool(expected) and enabled
     return {
         "label": "codex_plugin_version",
-        "status": "ok" if actual == expected and expected else "failed",
+        "status": "ok" if valid else "failed",
         "expected": expected,
         "actual": actual or None,
-        **({} if actual == expected and expected else {"reason": "installed plugin version mismatch"}),
+        "enabled": enabled,
+        **(
+            {}
+            if valid
+            else {
+                "reason": "installed Codex plugin version or enabled state is invalid"
+            }
+        ),
+    }
+
+
+def verify_claude_plugin_version(dry_run: bool = False) -> dict:
+    expected = str(
+        read_json(
+            bundle_root()
+            / "plugins"
+            / f"{PLUGIN_NAME}-claude-code"
+            / ".claude-plugin"
+            / "plugin.json"
+        ).get("version")
+        or ""
+    )
+    if dry_run:
+        return {
+            "label": "claude_plugin_version",
+            "status": "dry_run",
+            "expected": expected,
+        }
+    executable = shutil.which("claude")
+    if not executable:
+        return {
+            "label": "claude_plugin_version",
+            "status": "failed",
+            "reason": "claude CLI not found",
+        }
+    result = subprocess.run(
+        [executable, "plugin", "list", "--json"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    try:
+        installed = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        installed = []
+    match = next((item for item in installed if item.get("id") == PLUGIN), None)
+    actual = str((match or {}).get("version") or "")
+    enabled = bool((match or {}).get("enabled"))
+    valid = actual == expected and bool(expected) and enabled
+    return {
+        "label": "claude_plugin_version",
+        "status": "ok" if valid else "failed",
+        "expected": expected,
+        "actual": actual or None,
+        "enabled": enabled,
+        **(
+            {}
+            if valid
+            else {
+                "reason": "installed Claude Code plugin version or enabled state is invalid"
+            }
+        ),
     }
 
 
@@ -586,18 +794,30 @@ def copy_tree_replacing(source: Path, destination: Path) -> bool:
 
 
 def install_codex_cache_compat(dry_run: bool = False) -> dict:
-    manifest = read_json(bundle_root() / "plugins" / PLUGIN_NAME / ".codex-plugin" / "plugin.json")
+    manifest = read_json(
+        bundle_root() / "plugins" / PLUGIN_NAME / ".codex-plugin" / "plugin.json"
+    )
     version = str(manifest.get("version") or "").strip()
     codex_home = Path(os.getenv("CODEX_HOME") or (Path.home() / ".codex"))
     cache_root = codex_home / "plugins" / "cache" / PLUGIN_NAME
     source = cache_root / PLUGIN_NAME / version
-    destinations = [cache_root / version, cache_root / SKILL_CACHE_COMPAT_NAME / version]
+    destinations = [
+        cache_root / version,
+        cache_root / SKILL_CACHE_COMPAT_NAME / version,
+    ]
+    global_skill_source = (
+        bundle_root() / "plugins" / PLUGIN_NAME / "skills" / SKILL_CACHE_COMPAT_NAME
+    )
+    global_skill_destination = codex_home / "skills" / SKILL_CACHE_COMPAT_NAME
     if dry_run:
         return {
             "label": "codex_skill_path_compat",
             "status": "dry_run",
             "source": str(source),
-            "paths": [str(path) for path in destinations],
+            "paths": [
+                *[str(path) for path in destinations],
+                str(global_skill_destination),
+            ],
         }
     if not version or not source.exists():
         return {
@@ -607,10 +827,88 @@ def install_codex_cache_compat(dry_run: bool = False) -> dict:
         }
     for destination in destinations:
         copy_tree_replacing(source, destination)
+    if not copy_tree_replacing(global_skill_source, global_skill_destination):
+        return {
+            "label": "codex_skill_path_compat",
+            "status": "failed",
+            "reason": f"global skill source not found: {global_skill_source}",
+        }
     return {
         "label": "codex_skill_path_compat",
         "status": "ok",
-        "paths": [str(path) for path in destinations],
+        "paths": [
+            *[str(path) for path in destinations],
+            str(global_skill_destination),
+        ],
+    }
+
+
+def install_claude_skill_compat(dry_run: bool = False) -> dict:
+    source = (
+        bundle_root()
+        / "plugins"
+        / f"{PLUGIN_NAME}-claude-code"
+        / "skills"
+        / SKILL_CACHE_COMPAT_NAME
+    )
+    destination = Path.home() / ".claude" / "skills" / SKILL_CACHE_COMPAT_NAME
+    if dry_run:
+        return {
+            "label": "claude_skill_path_compat",
+            "status": "dry_run",
+            "source": str(source),
+            "path": str(destination),
+        }
+    if not copy_tree_replacing(source, destination):
+        return {
+            "label": "claude_skill_path_compat",
+            "status": "failed",
+            "reason": f"skill source not found: {source}",
+        }
+    return {
+        "label": "claude_skill_path_compat",
+        "status": "ok",
+        "path": str(destination),
+    }
+
+
+def verify_quality_skill(target: str, dry_run: bool = False) -> dict:
+    codex_home = Path(os.getenv("CODEX_HOME") or (Path.home() / ".codex"))
+    path = (
+        codex_home / "skills" / SKILL_CACHE_COMPAT_NAME / "SKILL.md"
+        if target == "codex"
+        else Path.home() / ".claude" / "skills" / SKILL_CACHE_COMPAT_NAME / "SKILL.md"
+    )
+    if dry_run:
+        return {
+            "label": "consultation_quality_rules",
+            "status": "dry_run",
+            "path": str(path),
+        }
+    try:
+        content = path.read_text(encoding="utf-8", errors="strict")
+    except (OSError, UnicodeError) as exc:
+        return {
+            "label": "consultation_quality_rules",
+            "status": "failed",
+            "path": str(path),
+            "reason": f"quality skill is missing or not valid UTF-8: {type(exc).__name__}: {exc}",
+        }
+    required = [
+        "最低3件",
+        "evaluate_hyp_consultation_answer",
+        "短い4章構成へ圧縮しない",
+        "SKILL.md` の場所を探したり",
+        "quote_ready_block",
+    ]
+    missing = [rule for rule in required if rule not in content]
+    return {
+        "label": "consultation_quality_rules",
+        "status": "failed" if missing else "ok",
+        "path": str(path),
+        "encoding": "UTF-8",
+        "required_rule_count": len(required),
+        **({"missing_rules": missing} if missing else {}),
     }
 
 
@@ -619,7 +917,11 @@ def configure_cursor(token: str, dry_run: bool = False) -> dict:
     if dry_run:
         return {"label": "cursor_mcp", "status": "dry_run", "path": str(path)}
     if not path.parent.exists():
-        return {"label": "cursor_mcp", "status": "failed", "reason": "~/.cursor not found"}
+        return {
+            "label": "cursor_mcp",
+            "status": "failed",
+            "reason": "~/.cursor not found",
+        }
     data = read_json(path)
     data.setdefault("mcpServers", {})[SERVER_NAME] = {
         "url": REMOTE_URL,
@@ -635,11 +937,21 @@ def configure_antigravity(token: str, dry_run: bool = False) -> list[dict]:
     config_path = Path.home() / ".gemini" / "antigravity" / "mcp_config.json"
     if dry_run:
         return [
-            {"label": "antigravity_plugin", "status": "dry_run", "path": str(plugin_dest)},
+            {
+                "label": "antigravity_plugin",
+                "status": "dry_run",
+                "path": str(plugin_dest),
+            },
             {"label": "antigravity_mcp", "status": "dry_run", "path": str(config_path)},
         ]
     if not (Path.home() / ".gemini").exists():
-        return [{"label": "antigravity", "status": "failed", "reason": "~/.gemini not found"}]
+        return [
+            {
+                "label": "antigravity",
+                "status": "failed",
+                "reason": "~/.gemini not found",
+            }
+        ]
     copy_tree_replacing(plugin_source, plugin_dest)
     data = read_json(config_path)
     data.setdefault("mcpServers", {})[SERVER_NAME] = {
@@ -656,17 +968,24 @@ def configure_antigravity(token: str, dry_run: bool = False) -> list[dict]:
 def setup_target(target: str, source: str, token: str, dry_run: bool) -> list[dict]:
     if target == "codex":
         return [
-            run_cleanup("codex_old_plugin", ["codex", "plugin", "remove", PLUGIN], dry_run),
+            run_cleanup(
+                "codex_old_plugin", ["codex", "plugin", "remove", PLUGIN], dry_run
+            ),
             run_cleanup(
                 "codex_old_marketplace",
                 ["codex", "plugin", "marketplace", "remove", PLUGIN_NAME],
                 dry_run,
             ),
             clear_codex_plugin_cache(dry_run),
-            run("codex_marketplace", ["codex", "plugin", "marketplace", "add", source], dry_run),
+            run(
+                "codex_marketplace",
+                ["codex", "plugin", "marketplace", "add", source],
+                dry_run,
+            ),
             run("codex_plugin", ["codex", "plugin", "add", PLUGIN], dry_run),
             install_codex_cache_compat(dry_run),
             verify_codex_plugin_version(dry_run),
+            verify_quality_skill("codex", dry_run),
         ]
     if target == "claude-code":
         return [
@@ -680,14 +999,27 @@ def setup_target(target: str, source: str, token: str, dry_run: bool) -> list[di
                 ["claude", "plugin", "marketplace", "remove", PLUGIN_NAME],
                 dry_run,
             ),
-            run("claude_marketplace", ["claude", "plugin", "marketplace", "add", source], dry_run),
-            run("claude_plugin", ["claude", "plugin", "install", "--scope", "user", PLUGIN], dry_run),
+            run(
+                "claude_marketplace",
+                ["claude", "plugin", "marketplace", "add", source],
+                dry_run,
+            ),
+            run(
+                "claude_plugin",
+                ["claude", "plugin", "install", "--scope", "user", PLUGIN],
+                dry_run,
+            ),
+            install_claude_skill_compat(dry_run),
+            verify_claude_plugin_version(dry_run),
+            verify_quality_skill("claude-code", dry_run),
         ]
     if target == "cursor":
         return [configure_cursor(token, dry_run)]
     if target == "antigravity":
         return configure_antigravity(token, dry_run)
-    return [{"label": "target", "status": "failed", "reason": f"unknown target: {target}"}]
+    return [
+        {"label": "target", "status": "failed", "reason": f"unknown target: {target}"}
+    ]
 
 
 def next_steps(target: str) -> list[str]:
@@ -702,7 +1034,7 @@ def next_steps(target: str) -> list[str]:
 
 
 def main() -> int:
-    target, source, dry_run, no_prompt = parse_args()
+    target, source, dry_run, no_prompt, no_auto_update = parse_args()
     if not target:
         print(
             json.dumps(
@@ -717,19 +1049,33 @@ def main() -> int:
         return 1
 
     token = "" if dry_run else resolve_token(no_prompt)
-    smoke = {"label": "remote_mcp_smoke", "status": "dry_run"} if dry_run else verify_remote(token)
+    smoke = (
+        {"label": "remote_mcp_smoke", "status": "dry_run"}
+        if dry_run
+        else verify_remote(token)
+    )
     if smoke["status"] == "failed":
-        print(json.dumps({"status": "failed", "results": [smoke]}, ensure_ascii=False, indent=2))
+        print(
+            json.dumps(
+                {"status": "failed", "results": [smoke]}, ensure_ascii=False, indent=2
+            )
+        )
         return 1
 
     runtime_result, runtime_source = stage_authenticated_marketplace(token, dry_run)
+    updater_result, updater_launcher = stage_updater_runtime(dry_run)
+    target_results = setup_target(target, runtime_source, token, dry_run)
     results = [
         persist_token(token, dry_run),
         remove_workspace_mcp_shadow(dry_run),
         runtime_result,
-        *setup_target(target, runtime_source, token, dry_run),
+        updater_result,
+        *target_results,
         smoke,
     ]
+    target_failed = any(item.get("status") == "failed" for item in target_results)
+    if target in {"codex", "claude-code"} and not no_auto_update and not target_failed:
+        results.append(configure_auto_update_schedule(updater_launcher, dry_run))
     failed = any(item.get("status") == "failed" for item in results)
     summary = {
         "status": "failed" if failed else "ok",
@@ -738,6 +1084,9 @@ def main() -> int:
         "runtime_source": runtime_source,
         "dry_run": dry_run,
         "client_restart_required": target == "codex" and not dry_run,
+        "auto_update_enabled": (
+            target in {"codex", "claude-code"} and not no_auto_update and not failed
+        ),
         "results": results,
         "next_steps": next_steps(target),
     }

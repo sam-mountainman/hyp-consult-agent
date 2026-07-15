@@ -1,6 +1,6 @@
 {
   "name": "hyp-consult-agent",
-  "version": "0.2.23",
+  "version": "0.2.24",
   "description": "HYP/UTAGE YouTube operation consultation agent for Codex.",
   "author": {
     "name": "hyp-consult-agent"
